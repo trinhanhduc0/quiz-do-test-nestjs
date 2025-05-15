@@ -53,4 +53,20 @@ export class ClassTestController {
         .json({ message: err.message });
     }
   }
+
+  @UseGuards(AuthGuard)
+  @Post('reset-class-test')
+  async resetClassTest(
+    @Body() info: { class_id: string; test_id: string },
+    @Req() req: Request,
+  ): Promise<boolean> {
+    const email: string = req.user.email || '';
+    const emailID: string = req.user.email_id || '';
+
+    return this.classTestService.resetCacheTest(
+      email,
+      info.class_id,
+      info.test_id,
+    );
+  }
 }

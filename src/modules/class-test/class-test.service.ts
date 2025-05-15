@@ -108,44 +108,54 @@ export class ClassTestService {
     answer?: Answer;
   }> {
     const classKey = `classTest:${classID}:${testID}`;
-    const questionsKey = `classTestQuestions:${testID}`; // Dành cho học sinh (ẩn đáp án)
-    const questionsFullKey = `classTestQuestionsFull:${testID}`; // Dành cho admin (đầy đủ)
+    const questionsKey = `classTestQuestions:${testID}`; // Dành cho học sinh
+    const questionsFullKey = `classTestQuestionsFull:${testID}`; // Dành cho admin
 
     const test_id = new Types.ObjectId(testID);
     const class_id = new Types.ObjectId(classID);
-    const existingAnswer = await this.answerService.findOne(
-      author_mail,
-      class_id,
-      test_id,
-      email,
-    );
-    if (!existingAnswer.email) {
-      const answer_user: CreateAnswerDto = new CreateAnswerDto();
-      answer_user.email = email;
-      answer_user.class_id = class_id;
-      answer_user.author_mail = author_mail;
-      answer_user.test_id = test_id;
-      await this.answerService.createAnswer(answer_user);
-    }
-    // 1. Lấy dữ liệu test từ Redis hoặc MongoDB
+
+    // 1. Lấy testDoc từ Redis hoặc Mongo
     let testDoc: any;
     let questionIDs: Types.ObjectId[] = [];
+    let existingAnswer: Answer | null = null;
 
     const cachedTest = await this.redisService.get(classKey);
 
     if (cachedTest) {
-      if (!cachedTest.students_accept?.includes(email)) {
+      testDoc = cachedTest;
+
+      if (!testDoc.students_accept?.includes(email)) {
         throw new Error('User not authorized for this test');
       }
-      testDoc = cachedTest;
-      questionIDs = cachedTest.question_ids;
+
+      questionIDs = testDoc.question_ids;
+
+      if (testDoc.is_test) {
+        existingAnswer = await this.answerService.findOne(
+          author_mail,
+          class_id,
+          test_id,
+          email,
+        );
+
+        if (!existingAnswer?.email) {
+          const answer_user: CreateAnswerDto = {
+            email,
+            class_id,
+            author_mail,
+            test_id,
+            start_time: Date.now(),
+          };
+          await this.answerService.createAnswer(answer_user);
+        }
+      }
     } else {
       const result = await this.classModel
         .findOne(
           {
-            _id: new Types.ObjectId(classID),
-            author_mail: author_mail,
-            'test._id': new Types.ObjectId(testID),
+            _id: class_id,
+            author_mail,
+            'test._id': test_id,
             students_accept: email,
           },
           {
@@ -155,7 +165,7 @@ export class ClassTestService {
         )
         .lean();
 
-      if (!result || !result.test?.[0]) {
+      if (!result?.test?.[0]) {
         throw new Error('No matching test found or user not authorized');
       }
 
@@ -163,15 +173,32 @@ export class ClassTestService {
       testDoc.students_accept = result.students_accept;
       questionIDs = testDoc.question_ids;
 
-      if (testDoc.time_start) {
-      }
-
       await this.redisService.set(classKey, JSON.stringify(testDoc), 3600);
+
+      if (testDoc.is_test) {
+        existingAnswer = await this.answerService.findOne(
+          author_mail,
+          class_id,
+          test_id,
+          email,
+        );
+
+        if (!existingAnswer?.email) {
+          const answer_user: CreateAnswerDto = {
+            email,
+            class_id,
+            author_mail,
+            test_id,
+
+            start_time: Date.now(),
+          };
+          await this.answerService.createAnswer(answer_user);
+        }
+      }
     }
 
-    // 2. Lấy danh sách câu hỏi (ẩn đáp án nếu là học sinh)
+    // 2. Lấy danh sách câu hỏi
     let questions: Partial<Question>[] = [];
-
     const cachedQuestions = await this.redisService.get(questionsKey);
 
     if (cachedQuestions) {
@@ -179,13 +206,9 @@ export class ClassTestService {
     } else {
       const rawQuestions = await this.getAllQuestionsByIds(questionIDs);
 
-      Logger.log(testDoc.is_test);
-      Logger.log(rawQuestions);
-
-      if (testDoc.is_test) {
-        // Cache câu hỏi đã làm sạch (ẩn đáp án) → dành cho học sinh
-        questions = this.cleanAndShuffleQuestions(rawQuestions);
-      } else questions = rawQuestions;
+      questions = testDoc.is_test
+        ? this.cleanAndShuffleQuestions(rawQuestions)
+        : rawQuestions;
 
       await this.redisService.set(
         questionsKey,
@@ -193,22 +216,42 @@ export class ClassTestService {
         3600,
       );
 
-      // Cache bản đầy đủ có đáp án → dành cho admin (chỉ cần làm 1 lần)
+      // Cache bản đầy đủ nếu chưa có (cho admin)
       await this.redisService.set(
         questionsFullKey,
         JSON.stringify(rawQuestions),
         3600,
       );
     }
-    const { students_accept, question_ids, email_id, ...info_clean } = testDoc;
 
-    const res = {
+    // 3. Chuẩn hóa dữ liệu trả về
+    const { students_accept, question_ids, email_id, ...test_info } = testDoc;
+
+    return {
       questions,
-      ...(existingAnswer.question_answer ? { answer: existingAnswer } : {}),
-      test_info: info_clean,
+      ...(existingAnswer?.question_answer ? { answer: existingAnswer } : {}),
+      test_info,
     };
+  }
 
-    // 4. Trả về dữ liệu
-    return res;
+  async resetCacheTest(
+    author_mail: string,
+    class_id: string,
+    test_id: string,
+  ): Promise<boolean> {
+    const classKey = `classTest:${class_id}:${test_id}`; // key lưu trữ thông tin test
+    const questionsKey = `classTestQuestions:${test_id}`; // Dành cho học sinh (ẩn đáp án)
+    const questionsFullKey = `classTestQuestionsFull:${test_id}`; // Dành cho admin (đầy đủ)
+
+    const data = await this.redisService.get(classKey);
+    if (data) {
+      if (data.author_mail === author_mail) {
+        this.redisService.delete(classKey);
+        this.redisService.delete(questionsKey);
+        this.redisService.delete(questionsFullKey);
+      }
+    }
+
+    return true;
   }
 }

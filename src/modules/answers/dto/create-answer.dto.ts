@@ -5,7 +5,6 @@ export class CreateAnswerDto {
   class_id: Types.ObjectId;
   test_id: Types.ObjectId;
   author_mail: string;
-  email_id: string;
   email: string;
 
   start_time: number;
