@@ -2,7 +2,21 @@ import { Prop, Schema } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 
 @Schema({ _id: false })
-export class MatchAnswer {
+export class MatchItems {
   @Prop()
-  matchid: Types.ObjectId;
+  id: Types.ObjectId;
+
+  @Prop()
+  text: string;
+}
+
+export class MatchOptions {
+  @Prop()
+  id: Types.ObjectId;
+
+  @Prop()
+  text: string;
+
+  @Prop({ required: false })
+  match_id: string;
 }

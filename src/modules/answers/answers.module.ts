@@ -4,7 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Answer, AnswerSchema } from './entities/answer.entity';
 import { AnswersController } from './answers.controller';
 import { AnswersService } from './answers.service';
-import { RedisService } from '../redis/entities/redi.entity';
+import { RedisService } from '../redis/entities/redis.entity';
 import { RedisModule } from '../redis/redis.module';
 
 @Module({

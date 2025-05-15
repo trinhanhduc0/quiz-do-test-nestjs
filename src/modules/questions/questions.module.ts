@@ -10,9 +10,9 @@ import { Question, QuestionSchema } from './entities/question.entity';
     MongooseModule.forFeature([
       { name: Question.name, schema: QuestionSchema },
     ]),
-  ], // Add any necessary imports here, such as MongooseModule for MongoDB
+  ], 
   controllers: [QuestionsController],
   providers: [QuestionsService],
-  exports: [QuestionsModule], // Export the service if needed in other modules
+  exports: [QuestionsService],
 })
 export class QuestionsModule {}

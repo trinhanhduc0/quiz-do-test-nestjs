@@ -10,12 +10,15 @@ import {
   QuestionSchema,
 } from '../questions/entities/question.entity';
 import { Answer, AnswerSchema } from '../answers/entities/answer.entity';
+import { AnswersModule } from '../answers/answers.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
+    AnswersModule,
     QuestionsModule,
+    RedisModule,
     MongooseModule.forFeature([
-      { name: Answer.name, schema: AnswerSchema },
       { name: Classes.name, schema: ClassTestSchema },
       { name: Question.name, schema: QuestionSchema }, // Assuming you have a Question schema defined
     ]), // Assuming you have a Classes schema defined

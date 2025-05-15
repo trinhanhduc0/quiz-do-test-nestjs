@@ -7,9 +7,6 @@ export class Option {
   id: Types.ObjectId;
 
   @Prop()
-  matchid: Types.ObjectId;
-
-  @Prop()
   text: string;
 
   @Prop()
@@ -17,10 +14,4 @@ export class Option {
 
   @Prop()
   iscorrect: boolean;
-
-  @Prop()
-  match: string;
-
-  @Prop()
-  order: number;
 }

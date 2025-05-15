@@ -4,10 +4,11 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
 import { FillInTheBlank } from './fill-in-the-blank.entity';
-import { MatchAnswer } from './match-answer.entity';
+import { MatchItems, MatchOptions } from './match-answer.entity';
 import { Metadata } from './metadata.entity';
 import { Option } from './option.entity';
 import { QuestionContent } from './question-content.entity';
+import { OrderItems } from './order.entity';
 
 export type QuestionDocument = HydratedDocument<Question>;
 
@@ -16,17 +17,8 @@ export class Question {
   @Prop()
   _id: Types.ObjectId;
 
-  @Prop({ type: [FillInTheBlank], default: [] })
-  fill_in_the_blank: FillInTheBlank[];
-
-  @Prop({ type: [MatchAnswer], default: [] })
-  match: MatchAnswer[];
-
   @Prop()
   metadata: Metadata;
-
-  @Prop({ type: [Option], default: [] })
-  options: Option[];
 
   @Prop()
   question_content: QuestionContent;
@@ -49,8 +41,20 @@ export class Question {
   @Prop()
   updated_at: Date;
 
-  @Prop()
-  correctOptionId: [];
+  @Prop({ type: [Option], default: [] })
+  options: Option[];
+
+  @Prop({ type: [FillInTheBlank], default: [] })
+  fill_in_the_blanks: FillInTheBlank[];
+
+  @Prop({ type: [OrderItems], default: [] })
+  order_items: OrderItems[];
+
+  @Prop({ type: [MatchItems], default: [] })
+  match_items: MatchItems[];
+
+  @Prop({ type: [MatchOptions], default: [] })
+  match_options: MatchOptions[];
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(Question);

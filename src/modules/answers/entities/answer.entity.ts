@@ -1,6 +1,6 @@
 // src/modules/answer/schemas/answer.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type AnswerDocument = HydratedDocument<Answer>;
 
@@ -51,14 +51,26 @@ export class Answer {
   @Prop({ type: Types.ObjectId })
   test_id: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId })
+  class_id: Types.ObjectId;
+
+  @Prop()
+  author_mail: string;
+
   @Prop()
   email_id: string;
 
   @Prop()
   email: string;
 
-  @Prop({ type: [QuestionAnswer], default: [] })
-  question_answer: QuestionAnswer[];
+  @Prop({ type: SchemaTypes.Mixed, default: [] })
+  question_answer: Record<
+    string,
+    {
+      type: string;
+      answer: any;
+    }
+  >;
 
   @Prop({ type: Number, default: 0 })
   score: number;

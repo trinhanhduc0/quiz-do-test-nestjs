@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, ObjectId } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CreateAnswerDto } from './dto/create-answer.dto';
 import { Answer } from './entities/answer.entity';
 import { UpdateAnswerDto } from './dto/update-answer.dto';
@@ -17,37 +17,22 @@ export class AnswersService {
   ) {}
 
   async createAnswer(createAnswerDto: CreateAnswerDto): Promise<Answer> {
-    const cleanedQuestionAnswers = createAnswerDto.question_answer.map((qa) => {
-      const cleaned: any = {
-        question_id: qa.question_id,
-        type: qa.type,
-      };
-
-      if (qa.fill_in_the_blank?.length) {
-        cleaned.fill_in_the_blank = qa.fill_in_the_blank;
-      }
-
-      if (qa.options?.length) {
-        cleaned.options = qa.options;
-      }
-
-      return cleaned;
-    });
-
-    const cleanedDto = {
-      ...createAnswerDto,
-      question_answer: cleanedQuestionAnswers,
-    };
-
-    const created = new this.testAnswerModel(cleanedDto);
+    createAnswerDto.start_time = Date.now();
+    const created = new this.testAnswerModel(createAnswerDto);
     return created.save();
   }
 
-  async findOne(test_id: ObjectId, email: string): Promise<Answer> {
+  async findOne(
+    author_mail: string,
+    class_id: Types.ObjectId,
+    test_id: Types.ObjectId,
+    email: string,
+  ): Promise<Answer> {
     const answer = await this.testAnswerModel
-      .findOne({ test_id, email })
+      .findOne({ author_mail, class_id, test_id, email })
       .exec();
     if (!answer) {
+      return new Answer();
       throw new NotFoundException(
         `Answer for test_id ${test_id} not found for email ${email}`,
       );
@@ -55,140 +40,134 @@ export class AnswersService {
     return answer;
   }
 
-  async updateAnswer(dto: UpdateAnswerDto, emailId: string, email: string) {
-    const testIdHex = dto.test_id?.toString();
+  async updateAnswer(dto: UpdateAnswerDto) {
+    dto.end_time = Date.now();
+    dto.class_id = new Types.ObjectId(dto.class_id);
+    dto.test_id = new Types.ObjectId(dto.test_id);
 
-    // 3. Lấy danh sách câu hỏi từ Redis
-    const rawQuestionJson = await this.redis.hgetAll(
-      `questions_id_${testIdHex}`,
-    );
-    const rawQuestionDefault = await this.redis.get(
-      `questions_default_${testIdHex}`,
-    );
-    if (!rawQuestionJson || !rawQuestionDefault) {
-      throw new NotFoundException('Test questions not found in Redis');
+    const questionsKey = `classTestQuestionsFull:${dto.test_id}`; // Dành cho học sinh (ẩn đáp án)
+
+    const cachedQuestions = await this.redis.get(questionsKey);
+
+    if (cachedQuestions) {
+      const parsedQuestions = cachedQuestions as (Question | undefined)[];
+      const questions: Question[] = parsedQuestions.filter(
+        (q): q is Question => q !== undefined,
+      );
+      dto.score = this.calculateScore(questions, dto.question_answer);
     }
 
-    const parsedQuestions: Record<string, Question[]> = {};
-
-    for (const key in rawQuestionJson) {
-      try {
-        const value = rawQuestionJson[key];
-        Logger.log('rawQuestionJson', rawQuestionJson);
-        // const jsonString =
-        //   typeof value === 'string' ? value : value?.toString?.();
-
-        // if (typeof jsonString === 'string') {
-        //   parsedQuestions[key] = JSON.parse(jsonString) as Question[];
-        // } else {
-        //   console.warn(`Value for key ${key} is not a string.`);
-        // }
-      } catch (error) {
-        console.error(`Failed to parse questions for key ${key}`, error);
-      }
-    }
-
-    if (!testIdHex || !parsedQuestions[testIdHex]) {
-      throw new NotFoundException('Parsed questions not found');
-    }
-
-    // 4. Tính điểm
-    const totalScore = this.calculateScore(
-      parsedQuestions[testIdHex],
-      dto.question_answer,
-    );
-
-    // 5. Ghi vào DB
-    const savedAnswer = await this.testAnswerModel.updateOne({
-      testId: dto.test_id,
-      email_id: emailId,
-      email: email,
-      question_answer: dto.question_answer,
-      score: totalScore,
-    });
-
-    return savedAnswer;
+    await this.testAnswerModel.updateOne(dto);
   }
 
-  private calculateScore(questions: Question[], answers: any[]): number {
+  private calculateScore(
+    questions: Question[],
+    answers: Record<
+      string,
+      {
+        type: string;
+        answer: any;
+      }
+    >,
+  ): number {
     let score = 0;
 
-    for (const answer of answers) {
-      const q = questions.find((q) => q._id.toString() === answer.question_id);
+    for (const [questionId, userAnswer] of Object.entries(answers)) {
+      const q = questions.find((q) => q._id.toString() === questionId);
       if (!q) continue;
 
       switch (q.type) {
-        case 'single': // single_choice_question
+        case 'single_choice_question': {
+          const correctOption = q.options?.find((opt) => opt.iscorrect);
+          if (correctOption?.id === userAnswer.answer) {
+            score += q.score;
+          }
+          break;
+        }
+
+        case 'multiple_choice_question': {
+          const correctOptions =
+            q.options?.filter((opt) => opt.iscorrect).map((opt) => opt.id) ||
+            [];
+          const answerSet = new Set(userAnswer.answer as string[]);
+          const correctSet = new Set(correctOptions);
           if (
-            q.correctOptionId &&
-            answer.optionIds?.[0] === q.correctOptionId
+            answerSet.size === correctSet.size &&
+            [...correctSet].every((id) => answerSet.has(id.toString()))
           ) {
             score += q.score;
           }
           break;
+        }
 
-        case 'multiple': // multiple_choice_question
-          if (Array.isArray(q.correctOptionId)) {
-            const correctSet = new Set(q.correctOptionId);
-            const answerSet = new Set(answer.optionIds as string[] | []);
-            if (this.setEquals(correctSet, answerSet)) {
-              score += q.score;
-            }
+        case 'fill_in_the_blank': {
+          const correctBlanks = q.fill_in_the_blanks || [];
+          const userBlanks = userAnswer.answer || {};
+          const allCorrect = correctBlanks.every((blank) => {
+            const userInput = (userBlanks[blank.id.toString()] || '')
+              .trim()
+              .toLowerCase();
+            return userInput === blank.correct_answer.trim().toLowerCase();
+          });
+          if (allCorrect) {
+            score += q.score;
           }
           break;
+        }
 
-        case 'fill': // fill_in_the_blank
-          if (
-            Array.isArray(q.fill_in_the_blank) &&
-            Array.isArray(answer.fill_in_the_blank) &&
-            q.fill_in_the_blank.length === answer.fill_in_the_blank.length
-          ) {
-            const isCorrect = q.fill_in_the_blank.every(
-              (correct, idx) =>
-                correct.blank.trim().toLowerCase() ===
-                answer.fill_in_the_blank[idx]?.trim().toLowerCase(),
+        case 'order_question': {
+          const correctOrder = (q.order_items || [])
+            .sort((a, b) => a.order - b.order)
+            .map((item) => item.id);
+          const userOrder = (userAnswer.answer as string[]) || [];
+          const isCorrect =
+            correctOrder.length === userOrder.length &&
+            correctOrder.every(
+              (id, index) => id.toString() === userOrder[index],
             );
-            if (isCorrect) score += q.score;
-          }
-          break;
 
-        case 'order': // order_question
-          if (
-            Array.isArray(q.correctOptionId) &&
-            Array.isArray(answer.optionIds) &&
-            q.correctOptionId.length === answer.optionIds.length
-          ) {
-            const isCorrect = q.correctOptionId.every(
-              (id, index) => id === answer.optionIds[index],
-            );
-            if (isCorrect) score += q.score;
+          if (isCorrect) {
+            score += q.score;
           }
-          break;
 
-        case 'match': // match_choice_question
-          const isCorrect = q.match.every(
-            (correct, idx) => correct.matchid === answer[idx].matchid,
+          break;
+        }
+
+        case 'match_choice_question': {
+          const correctMatch = (q.match_options || []).reduce(
+            (acc, opt) => {
+              const matchId = opt.match_id?.toString();
+              if (!matchId) return acc;
+              if (!acc[matchId]) acc[matchId] = [];
+              acc[matchId].push(opt.id.toString());
+              return acc;
+            },
+            {} as Record<string, string[]>,
           );
-          if (isCorrect) score += q.score;
-          break;
 
-        case 'text':
-          // if (
-          //   typeof q.correctAnswer === 'string' &&
-          //   typeof answer.answerText === 'string' &&
-          //   q.correctAnswer.trim().toLowerCase() ===
-          //     answer.answerText.trim().toLowerCase()
-          // ) {
-          //   score += q.score;
-          // }
+          const userMatch = userAnswer.answer || {};
+
+          const allCorrect = Object.entries(correctMatch).every(
+            ([matchId, correctIds]) => {
+              const userIds = userMatch[matchId] || [];
+              return (
+                userIds.length === correctIds.length &&
+                correctIds.every((id) => userIds.includes(id))
+              );
+            },
+          );
+
+          if (allCorrect) {
+            score += q.score || 0;
+          }
           break;
+        }
 
         default:
           console.warn('Unknown question type:', q.type);
           break;
       }
     }
-
     return score;
   }
 
