@@ -117,7 +117,7 @@ export class ClassTestService {
     // 1. Lấy testDoc từ Redis hoặc Mongo
     let testDoc: any;
     let questionIDs: Types.ObjectId[] = [];
-    let existingAnswer: Answer | null = null;
+    let existingAnswer: any = null;
 
     const cachedTest = await this.redisService.get(classKey);
 
@@ -129,15 +129,13 @@ export class ClassTestService {
       }
 
       questionIDs = testDoc.question_ids;
-
+      existingAnswer = await this.answerService.findOne(
+        author_mail,
+        class_id,
+        test_id,
+        email,
+      );
       if (testDoc.is_test) {
-        existingAnswer = await this.answerService.findOne(
-          author_mail,
-          class_id,
-          test_id,
-          email,
-        );
-
         if (!existingAnswer?.email) {
           const answer_user: CreateAnswerDto = {
             email,
@@ -176,13 +174,6 @@ export class ClassTestService {
       await this.redisService.set(classKey, JSON.stringify(testDoc), 3600);
 
       if (testDoc.is_test) {
-        existingAnswer = await this.answerService.findOne(
-          author_mail,
-          class_id,
-          test_id,
-          email,
-        );
-
         if (!existingAnswer?.email) {
           const answer_user: CreateAnswerDto = {
             email,
@@ -206,9 +197,10 @@ export class ClassTestService {
     } else {
       const rawQuestions = await this.getAllQuestionsByIds(questionIDs);
 
-      questions = testDoc.is_test
-        ? this.cleanAndShuffleQuestions(rawQuestions)
-        : rawQuestions;
+      questions =
+        testDoc.is_test && !existingAnswer?.email
+          ? this.cleanAndShuffleQuestions(rawQuestions)
+          : rawQuestions;
 
       await this.redisService.set(
         questionsKey,
