@@ -61,8 +61,8 @@ export class ClassTestController {
     @Req() req: Request,
   ): Promise<boolean> {
     const email: string = req.user.email || '';
-    const emailID: string = req.user.email_id || '';
-
+    const email_id: string = req.user.email_id || '';
+    
     return this.classTestService.resetCacheTest(
       email,
       info.class_id,

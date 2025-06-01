@@ -20,7 +20,7 @@ export class ClassTestService {
     private readonly answerService: AnswersService,
     @InjectModel(Classes.name) private classModel: Model<ClassTestDocument>,
     @InjectModel(Question.name) private questionModel: Model<QuestionDocument>,
-  ) {}
+  ) { }
 
   async getAllQuestionsByIds(
     ids: Types.ObjectId[] | string[],
@@ -172,7 +172,12 @@ export class ClassTestService {
       questionIDs = testDoc.question_ids;
 
       await this.redisService.set(classKey, JSON.stringify(testDoc), 3600);
-
+      existingAnswer = await this.answerService.findOne(
+        author_mail,
+        class_id,
+        test_id,
+        email,
+      );
       if (testDoc.is_test) {
         if (!existingAnswer?.email) {
           const answer_user: CreateAnswerDto = {
@@ -234,7 +239,7 @@ export class ClassTestService {
     const classKey = `classTest:${class_id}:${test_id}`; // key lưu trữ thông tin test
     const questionsKey = `classTestQuestions:${test_id}`; // Dành cho học sinh (ẩn đáp án)
     const questionsFullKey = `classTestQuestionsFull:${test_id}`; // Dành cho admin (đầy đủ)
-
+    Logger.log(classKey)
     const data = await this.redisService.get(classKey);
     if (data) {
       if (data.author_mail === author_mail) {
@@ -243,6 +248,7 @@ export class ClassTestService {
         this.redisService.delete(questionsFullKey);
       }
     }
+    Logger.log(data)
 
     return true;
   }
